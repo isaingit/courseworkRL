@@ -51,7 +51,6 @@ dependencies:
   - tornado=6.4.2=py312h4389bb4_0
   - traitlets=5.14.3=pyhd8ed1ab_1
   - typing_extensions=4.13.2=pyh29332c3_0
-  - tzdata=2025b=h78e105d_0
   - ucrt=10.0.22621.0=h57928b3_1
   - vc=14.3=h2b53caa_26
   - vc14_runtime=14.42.34438=hfd919c2_26
@@ -63,8 +62,28 @@ dependencies:
   - zipp=3.21.0=pyhd8ed1ab_1
   - pip:
       - cloudpickle==3.1.1
+      - contourpy==1.3.2
+      - cycler==0.12.1
       - farama-notifications==0.0.4
+      - filelock==3.18.0
+      - fonttools==4.58.4
+      - fsspec==2025.5.1
       - gymnasium==1.1.1
+      - jinja2==3.1.6
+      - kiwisolver==1.4.8
+      - markupsafe==3.0.2
+      - matplotlib==3.10.3
+      - mpmath==1.3.0
+      - networkx==3.5
       - numpy==2.2.5
-      - scipy==1.15.3
-prefix: C:\Users\Usuario\anaconda3\envs\ml4ce_rl
+      - pandas==2.3.1
+      - pillow==11.2.1
+      - pyparsing==3.2.3
+      - pytz==2025.2
+      - scipy==1.16.0
+      - sympy==1.14.0
+      - torch==2.7.1
+      - torchaudio==2.7.1
+      - torchvision==0.22.1
+      - tzdata==2025.2
+prefix: C:\Users\EQUIPO\miniconda3\envs\ml4ce_rl
