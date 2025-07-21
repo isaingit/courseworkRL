@@ -1,6 +1,7 @@
 import gymnasium as gym
 import numpy as np
 from scipy.stats import poisson
+import copy
 
 class MESCEnv():   
     def __init__(self, structure, *args, **kwargs):
@@ -8,14 +9,18 @@ class MESCEnv():
         Args:
             structure : List of integers whose length is the number of stages and each element is the number of participants in that stage.
         '''
+        self.name = "InventoryManagement"
         # Default values for the initial conditions (overriden if kwargs are passed)
         self.n_periods = 52*7 # 52 weeks * 7 days
         self.seed = 0
         self.demand_dist_fcn = poisson
         self.demand_dist_param = [{'mu': 3}, # Mo-Thu
-                                  {'mu': 6}, # Fri
-                                  {'mu': 12}] # Sat-Sun
+                                  {'mu': 10}, # Fri
+                                  {'mu': 15}] # Sat-Sun
         
+        # Buffers to store data
+        self.demand_dataset = None # Attribute to store the demands of the episode if externally provided (e.g., during evaluation)
+
         # Assigned the sub-classed frozen distribution to the demand distribution function
         if self.demand_dist_fcn is poisson:
             self.demand_dist = frozen_poisson(random_state=self.seed)
@@ -28,13 +33,13 @@ class MESCEnv():
         self.structure = structure # Number of retailers and DCs in the system
         # Instantiate retailers        
         self.retailers = []
-        for i in range(structure[0]):
+        for i in range(sum(structure[0])):
             self.retailers.append(Retailer())
 
         # Instantiate DCs  
         self.DCs = []
-        for i in range(structure[1]):
-            self.DCs.append(DC(self.retailers))
+        for i in range(len(structure[1])):
+            self.DCs.append(DC(self.retailers[(i*structure[0][i]):(i*structure[0][i]+structure[0][i])]))
 
         self.reset()
 
@@ -55,11 +60,15 @@ class MESCEnv():
     def _RESET(self):
         self.current_period = 1
         self.dow = 0
-
-        self.demand_log , self.prob_per_scenario = self.sample_demands_episode()
+        
+        # Definition of the self.demands_episode attribute, which stores the demand information that will be actually used during self.step()
+        if self.demand_dataset is None:
+            self.demands_episode , self.prob_per_scenario = self.sample_demands_episode()
+        else:
+            self.demands_episode = copy.deepcopy(self.demand_dataset)
 
         for i, retailer in enumerate(self.retailers):
-            retailer.reset(self.demand_log[:,i])
+            retailer.reset(self.demands_episode[:,i])
         for DC in self.DCs:
             DC.reset()
         
@@ -68,7 +77,9 @@ class MESCEnv():
         return self._RESET()
 
     def _STEP(self, action):
-        
+        #> 0. Ensure action is of the correct dtype
+        action = action.astype(np.int16) 
+
         for i in range(len(self.DCs)):
             #> 1.1 DCs place orders to supplier
             # TODO: revise it's being done correctly. Depending on the meaning, it should take one action or the other.
@@ -78,7 +89,7 @@ class MESCEnv():
             self.DCs[i].receive_order(self.current_period)
 
             #> 1.3 DCs satisfy demand from retailers
-            self.DCs[i].satisfy_demand(self.retailers, action[:len(self.retailers)], self.current_period)
+            self.DCs[i].satisfy_demand(self.DCs[i].retailers, action[:len(self.retailers)], self.current_period)
         
         for i in range(len(self.retailers)):
             #> 2.1 Retailers receive orders from DCs
@@ -93,8 +104,9 @@ class MESCEnv():
         fixed_order_cost = np.sum(DC.fix_order_cost*DC.n_orders for DC in self.DCs) + np.sum(retailer.fix_order_cost*retailer.n_orders for retailer in self.retailers)
         var_order_cost = np.sum(DC.var_order_cost * action[i+len(self.retailers)] for i, DC in enumerate(self.DCs))
         penalty_unsatisfied_demand = np.sum(retailer.UD * retailer.lost_sales_cost for retailer in self.retailers) 
-        reward = revenue - holding_cost - fixed_order_cost - var_order_cost - penalty_unsatisfied_demand
-
+        penalty_capacity_violation = np.sum(DC.I_surplus * DC.capacity_violation_cost for DC in self.DCs) + np.sum(retailer.I_surplus * retailer.capacity_violation_cost for retailer in self.retailers) # Penalty for exceeding storage capacity
+        reward = revenue - holding_cost - fixed_order_cost - var_order_cost - penalty_unsatisfied_demand - penalty_capacity_violation
+        # print(f"Period {self.current_period} - Reward: {reward}, Revenue: {revenue}, Holding Cost: {holding_cost}, Fixed Order Cost: {fixed_order_cost}, Variable Order Cost: {var_order_cost}, Penalty Unsatisfied Demand: {penalty_unsatisfied_demand}, Penalty Capacity Violation: {penalty_capacity_violation}")
         #> 4. Update period
         self.current_period += 1
 
@@ -119,7 +131,7 @@ class MESCEnv():
         '''
         Sample demand for each retailer in the current period. The demand distribution function is defined in the __init__ method.
         '''
-        demand_log = []
+        demands_episode = []
         prob_per_scenario = np.zeros(self.n_periods, dtype=np.float32)
         for i in range(self.n_periods):
             if self.dow < 4:
@@ -129,23 +141,26 @@ class MESCEnv():
             else:
                 demand_dist_param = self.demand_dist_param[2]
 
-            scenario = self.demand_dist.rvs(**demand_dist_param, size=self.structure[0])
+            scenario = self.demand_dist.rvs(**demand_dist_param, size=len(self.retailers))
             prob_per_scenario[i] = np.prod([self.demand_dist.pmf(scenario[j], **demand_dist_param) for j in range(len(scenario))])
-            demand_log.append(scenario)
+            demands_episode.append(scenario)
 
-        return np.array(demand_log), prob_per_scenario 
+        return np.array(demands_episode), prob_per_scenario 
 
 class DC():
     def __init__(self, retailers , *args, **kwargs):
         # Defaul values for the initial conditions (overriden if kwargs are passed)
         self.I0 = 100 # Initial on-hand inventory
         self.lead_time = 5
-        self.capacity = 200 # storage capacity of the DC
-        self.order_quantity_limit = 100 # productive capacity of DC's supplier. TBD: check how now it's unused
+        self.capacity = 150 # storage capacity of the DC
+        self.order_quantity_limit = 200 # productive capacity of DC's supplier. TBD: check how now it's unused
         self.holding_cost = 1
         self.fix_order_cost = 75
         self.var_order_cost = 10 # It was set in the parent class in the original article
+        self.capacity_violation_cost = 30 # Penalty of exceeding storage capacity expressed in cost/item
 
+        self.retailers = retailers # List of retailers served by the DC
+        
         self.reset()
         
     def reset(self):
@@ -154,6 +169,7 @@ class DC():
         self.capacity = np.array(self.capacity, dtype=np.int16)
         # Initialize variables
         self.I = np.array(self.I0, dtype = np.int16) # On-hand inventory at the start of each period
+        self.I_surplus = np.array(0, dtype=np.int16) # Number of units by which capacity constraint is violated at the start of each period
         self.T = np.array(0, dtype=np.int16) # Pipeline inventory at the start of each period
         self.backlog = np.array(0, dtype=np.int16) # Quantity that DC requests to supplier but supplier denies/is unable to provide
         self.inv_pos = self.I+self.T-self.backlog # Inventory position = On hand inventory + Pipeline inventory - Backlogged demand
@@ -179,12 +195,18 @@ class DC():
             self.n_orders = 0 # Reset the number of orders placed by the DC to the supplier in the current period
 
     def receive_order(self, current_period):
+        # Receive order
         if len(self.action_log) > 0 :
             if current_period == self.action_log[0][0] :
-                self.I = min(self.capacity , self.action_log[0][1])
+                # self.I = min(self.capacity , self.I + self.action_log[0][1])
+                self.I += self.action_log[0][1]
                 self.action_log.pop(0)
+        
+        # Check if inventory at hand surpasses storage capacity
+        self.I_surplus = max(0, self.I-self.capacity)
 
     def satisfy_demand(self, retailers, actions, current_period):
+
         #> 0. Initialize arrarys to accumulate demnand satisfaction to compute the number of orders placed
         total_demand_satisfied = np.zeros(len(retailers), dtype=np.int16) # sum of backlogged and current demand satisfied in current period
 
@@ -238,12 +260,13 @@ class Retailer():
     def __init__(self, *args, **kwargs):
         self.I0 = 25
         self.lead_time = 2
-        self.capacity = 50
-        self.order_quantity_limit = 20
+        self.capacity = 75
+        self.order_quantity_limit = 50
         self.holding_cost = 3
         self.fix_order_cost = 50
-        self.unit_price = 30
+        self.unit_price = 50
         self.lost_sales_cost = 5
+        self.capacity_violation_cost = self.unit_price/4 # Penalty for exceeding storage capacity expressed in cost/item
         
         self.reset()
 
@@ -253,6 +276,7 @@ class Retailer():
         self.capacity = np.array(self.capacity, dtype=np.int16)
         # Initialize variables
         self.I = np.array(self.I0, dtype=np.int16)
+        self.I_surplus = np.array(0, dtype=np.int16) # Number of units by which capacity constraint is violated at the start of each period
         self.T = np.array(0, dtype=np.int16) # Pipeline inventory at the start of each period
         self.SD = np.array(0, dtype=np.int16) # Sales performed at each period 
         self.UD = np.array(0, dtype=np.int16) # Unsatisfied demand at each period
@@ -263,7 +287,7 @@ class Retailer():
         self.n_orders = 0 # Number of orders placed by the retailer to the supplier in the current period
         # Initialize action record
         if len(args) > 0:
-            self.demand_log = args[0] # Demand log for the current episode
+            self.demands_episode = args[0] # Demand log for the current episode
 
     def place_order(self):
         '''
@@ -282,10 +306,13 @@ class Retailer():
                 new_order_arrival_list.append((arrival_time, order_quantity))
         self.order_arrival_list = new_order_arrival_list
 
+        # Check if inventory at hand surpasses storage capacity
+        self.I_surplus = max(0, self.I-self.capacity)
+
         return n_orders
     
     def satisfy_demand(self, current_period):
-        demand = self.demand_log[current_period] 
+        demand = self.demands_episode[current_period] 
         self.SD = np.minimum(demand, self.I, dtype=self.I.dtype)
         self.I -= self.SD
         self.UD = demand - self.SD
