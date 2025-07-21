@@ -8,8 +8,7 @@ Welcome! This repository is designed to introduce Chemical Engineering students 
 ## Repository Structure
 
 courseworkRL/
-│
-└── README.md             # This file
+- README.md             # This file
 ---
 
 ## Setup & Installation
@@ -23,9 +22,7 @@ courseworkRL/
 ```bash
 git clone https://github.com/isaingit/courseworkRL.git
 cd courseworkRL
-
-# Create virtual environment (optional but r
-
+```
 ---
 Happy learning!
 — The Course Team
