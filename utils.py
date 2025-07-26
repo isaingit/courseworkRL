@@ -54,13 +54,22 @@ def plot_reward_distribution(reward_arr, labels=None):
     Arguments:
         reward_arr : must be a [n_episodes, n_data_sets] array
     '''
+    if  isinstance(reward_arr, list) or reward_arr.ndim == 1:
+        fig = plt.figure(figsize=(5,5))
+        plt.hist(reward_arr, density = True);
+        plt.xlabel('Empirical expected reward (MU)') # TODO :  update monetary units to actual units
+        plt.ylabel('Probability density')
+        if labels is not None:
+            plt.legend(labels)
 
-    fig = plt.figure(figsize=(5,5))
-    plt.hist(reward_arr, density = True);
-    plt.xlabel('Empirical expected reward (MU)') # TODO :  update monetary units to actual units
-    plt.ylabel('Probability density')
-    if labels is not None:
-        plt.legend(labels)
+    else:
+        _ , axs = plt.subplots(1, reward_arr.shape[1], figsize=(5*reward_arr.shape[1], 5))
+        for i in range(reward_arr.shape[1]):
+            axs[i].hist(reward_arr[:, i], density=True)
+            axs[i].set_xlabel('Empirical expected reward (MU)')
+            axs[i].set_ylabel('Probability density')
+            if labels is not None:
+                axs[i].set_title(labels[i])
 
 def setup_logging():
 
