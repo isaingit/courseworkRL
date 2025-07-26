@@ -1,8 +1,8 @@
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib as mpl   
-import os
 
 SMALL_SIZE = 8
 MEDIUM_SIZE = 10
@@ -17,6 +17,8 @@ mpl.rc("legend", fontsize=SMALL_SIZE)  # legend fontsize
 
 mpl.rc("figure", figsize=(10, 5))
 mpl.rc("savefig", bbox="tight", dpi=600)
+
+plt.ion()  # Enable interactive mode for live plotting
 
 def read_log_file(log_file_path):
     df = pd.read_csv(log_file_path)

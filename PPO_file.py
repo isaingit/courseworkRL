@@ -8,8 +8,6 @@ import os
 import time
 from utils import setup_logging, setup_model_saving
 '''
-ActorCritic class implemented as if action space was discrete.
-
 REFERENCES:
 # https://github.com/OptiMaL-PSE-Lab/REINFORCE-PSE
 # train nn from scratch using scipy minimize https://euanrussano.github.io/20190821neuralNetworkScratch/
@@ -41,20 +39,20 @@ class ActorCritic(nn.Module):
         self.action_var = torch.full((self.num_actions,), action_std_init * action_std_init)
 
         self.actor = nn.Sequential(
-                        nn.Linear(self.num_states, 32),
+                        nn.Linear(self.num_states, 256),
                         nn.Tanh(),
-                        nn.Linear(32, 32),
+                        nn.Linear(256, 256),
                         nn.Tanh(),
-                        nn.Linear(32, self.num_actions),
+                        nn.Linear(256, self.num_actions),
                         nn.ReLU() # TODO: check if this activation is appropriate for the action space
                         )
 
         self.critic =  nn.Sequential(
-                        nn.Linear(self.num_states, 16),
+                        nn.Linear(self.num_states, 128),
                         nn.Tanh(),
-                        nn.Linear(16, 16),
+                        nn.Linear(128, 128),
                         nn.Tanh(),
-                        nn.Linear(16, 1),
+                        nn.Linear(128, 1),
                         )      
 
     def set_action_std(self, action_std):
@@ -260,22 +258,22 @@ class PPO:
                     self.policy.set_action_std(self.action_std)
                     self.policy_old.set_action_std(self.action_std)
 
-                ## Check if data should be logged
-                if logging and count_timesteps % self.log_freq == 0:
-                    # log average reward till last episode
-                    log_avg_reward = log_running_reward / log_running_episodes
-                    log_avg_reward = round(log_avg_reward, 4)
-                    # Write to log file
-                    log_f.write('{},{},{}\n'.format(count_episodes, count_timesteps, log_avg_reward))
-                    log_f.flush()
-                    # Reset running reward and episodes counters
-                    log_running_reward = 0
-                    log_running_episodes = 0
-
             ### Update episode counter
             count_episodes += 1
             if verbose:
                 print(f"Episode: {count_episodes}, Time step: {count_timesteps}, Update nr.: {count_updates}")
+
+            ## Check if data should be logged
+            if logging and count_episodes % self.log_freq == 0:
+                # log average reward till last episode
+                log_avg_reward = log_running_reward / log_running_episodes
+                log_avg_reward = round(log_avg_reward, 4)
+                # Write to log file
+                log_f.write('{:.0f},{:.0f},{:.3f}\n'.format(count_episodes, count_timesteps, log_avg_reward))
+                log_f.flush()
+                # Reset running reward and episodes counters
+                log_running_reward = 0
+                log_running_episodes = 0
 
         # Close log file
         if logging:
