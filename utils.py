@@ -35,7 +35,7 @@ def plot_reward_evolution(timesteps, rewards, save_dir=None, ):
     timesteps_smooth = timesteps[:len(rewards_smooth)]
 
     # Plotting
-    # plt.figure(figsize=(10, 6))
+    plt.clf()
     plt.plot(timesteps, rewards, label='Average reward', color='dodgerblue', alpha=0.5)
     plt.plot(timesteps_smooth, rewards_smooth, label='Smoothed reward (moving average)', color='orange', linewidth=2)
 

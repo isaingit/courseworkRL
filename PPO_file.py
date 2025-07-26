@@ -38,6 +38,7 @@ class ActorCritic(nn.Module):
         self.num_actions = num_actions
         self.action_var = torch.full((self.num_actions,), action_std_init * action_std_init)
 
+        torch.manual_seed(24)
         self.actor = nn.Sequential(
                         nn.Linear(self.num_states, 256),
                         nn.Tanh(),
@@ -53,7 +54,7 @@ class ActorCritic(nn.Module):
                         nn.Linear(128, 128),
                         nn.Tanh(),
                         nn.Linear(128, 1),
-                        )      
+                        )   
 
     def set_action_std(self, action_std):
         self.action_var = torch.full((self.num_actions,), action_std * action_std)
@@ -160,6 +161,9 @@ class PPO:
             rewards.insert(0,discounted_reward) # insert method is used to fill a list from the top (opposite to append). This is done by specifying pos=0, given that the syntax is insert(pos,elmnt)
         rewards = torch.tensor(rewards, dtype=torch.float32) 
 
+        ### Normalize rewards. PPO is very sensitive to the scale of the loss funciton. If rewards are too high or too low, updated can be erratic.
+        rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-10)
+
         ### Convert lists to tensors
         '''
          The RolloutBuffer object contains lists, which must be transformed into tensors before being used.
@@ -178,8 +182,7 @@ class PPO:
             ## Compute advantage estimate based on current value function (Step 5 in OpenAI's PPO paper)
             action_logprobs, state_values , _ = self.policy.evaluate(batch_states, batch_actions) 
             ratio = torch.exp(action_logprobs - batch_logprobs.detach())         
-            advantage = rewards - state_values.squeeze().detach()
-            advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-10) # Normalize advantage function
+            advantage = rewards - state_values.squeeze().detach() 
           
             ## Update actor (Step 6 in OpenAI's PPO paper)
             loss_actor = (-1) * torch.min( ratio * advantage ,
@@ -261,7 +264,7 @@ class PPO:
             ### Update episode counter
             count_episodes += 1
             if verbose:
-                print(f"Episode: {count_episodes}, Time step: {count_timesteps}, Update nr.: {count_updates}")
+                print(f"Episode: {count_episodes}, Time step: {count_timesteps}, Update nr.: {count_updates}, Undiscounted reward: {current_reward:.2f}")
 
             ## Check if data should be logged
             if logging and count_episodes % self.log_freq == 0:

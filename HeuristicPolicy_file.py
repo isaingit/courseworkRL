@@ -1,4 +1,4 @@
-from IMP_CW_env_v2 import MESCEnv
+from IMP_CW_env import MESCEnv
 import numpy as np 
 from scipy.optimize import minimize, basinhopping
 import matplotlib.pyplot as plt
