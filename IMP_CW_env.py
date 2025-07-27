@@ -151,12 +151,12 @@ class DC():
     def __init__(self, retailers , *args, **kwargs):
         # Defaul values for the initial conditions (overriden if kwargs are passed)
         self.I0 = 100 # Initial on-hand inventory
-        self.lead_time = 5
+        self.lead_time = 3
         self.capacity = 150 # storage capacity of the DC
         self.order_quantity_limit = 200 # productive capacity of DC's supplier. TBD: check how now it's unused
-        self.holding_cost = 1
-        self.fix_order_cost = 75
-        self.var_order_cost = 10 # It was set in the parent class in the original article
+        self.holding_cost = .5
+        self.fix_order_cost = 50
+        self.var_order_cost = 5 # It was set in the parent class in the original article
         self.capacity_violation_cost = 30 # Penalty of exceeding storage capacity expressed in cost/item
 
         self.retailers = retailers # List of retailers served by the DC
@@ -263,10 +263,10 @@ class Retailer():
         self.capacity = 75
         self.order_quantity_limit = 50
         self.holding_cost = 3
-        self.fix_order_cost = 50
-        self.unit_price = 50
+        self.fix_order_cost = 10
+        self.unit_price = 100
         self.lost_sales_cost = 5
-        self.capacity_violation_cost = self.unit_price/4 # Penalty for exceeding storage capacity expressed in cost/item
+        self.capacity_violation_cost = 15 # Penalty for exceeding storage capacity expressed in cost/item
         
         self.reset()
 
