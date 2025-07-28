@@ -27,17 +27,27 @@ def read_log_file(log_file_path):
     return x, y
 
 def plot_reward_evolution(timesteps, rewards, save_dir=None, ):
-    def moving_average(data, window_size):
-        return np.convolve(data, np.ones(window_size)/window_size, mode='valid')
     
-    window_size = int(len(rewards)*.05)
-    rewards_smooth = moving_average(rewards, window_size)
+    def smooth(scalars: list[float], weight: float) -> list[float]:  # Weight between 0 and 1
+        '''
+        Implementation of the exponential moving average (EMA) method for smoothing a series
+        '''
+        last = scalars[0]  # First value in the plot (first timestep)
+        smoothed = list()
+        for point in scalars:
+            smoothed_val = last * weight + (1 - weight) * point  
+            smoothed.append(smoothed_val)                        
+            last = smoothed_val                                  
+            
+        return smoothed
+    
+    rewards_smooth = smooth(rewards, 0.75)
     timesteps_smooth = timesteps[:len(rewards_smooth)]
 
     # Plotting
     plt.clf()
     plt.plot(timesteps, rewards, label='Average reward', color='dodgerblue', alpha=0.5)
-    plt.plot(timesteps_smooth, rewards_smooth, label='Smoothed reward (moving average)', color='orange', linewidth=2)
+    plt.plot(timesteps_smooth, rewards_smooth, label='Smoothed reward (EMA)', color='orange', linewidth=2)
 
     # Labels and title
     plt.xlabel("Time steps")
