@@ -14,7 +14,7 @@ class HeuristicPolicy:
         initial_policy[0::2] = (1/3) * initial_policy[1::2] 
         self.policy_param = initial_policy
 
-    def optimize_policy(self, env, objective_fcn, method='Powell', options=None, callback=None):
+    def optimize_policy(self, env, objective_fcn, method='Powell', bounds=None, options=None, callback=None):
 
         if self.policy_param is None:
             self.set_initial_policy(env)
@@ -32,6 +32,7 @@ class HeuristicPolicy:
                         x0 = self.policy_param,
                         args = (self.policy_fcn, env),
                         method = method,
+                        bounds = bounds ,
                         tol = 1e-8,
                         options = options,
                         callback= callback

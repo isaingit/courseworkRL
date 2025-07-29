@@ -250,7 +250,6 @@ class PPO:
                 ## Update counters
                 count_timesteps += 1
                 current_reward += reward
-                log_running_episodes += 1
                 log_running_reward += reward
             
                 ## Update Actor & Critic networks
@@ -269,6 +268,7 @@ class PPO:
 
             ### Update episode counter
             count_episodes += 1
+            log_running_episodes += 1
             if verbose:
                 print(f"Episode: {count_episodes}, Time step: {count_timesteps}, Update nr.: {count_updates}, Undiscounted reward: {current_reward:.2f}")
 
