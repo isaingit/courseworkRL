@@ -128,10 +128,15 @@ class PPO:
 
         # Set up logging 
         self.log_dir = os.getcwd() + '/PPO_logs' # Directory where the logs will be saved
-        self.log_freq = log_freq # NOTE : log frequencies should be > than max_ep_len
+        self.log_freq = log_freq # Save logs every log_freq episodes
+        self.log_f_name = None # Name of the log file to be created
 
         # Set up path to save the policy
         self.save_path = os.getcwd() + '/PPO_policy.pt' # Path to save the policy
+
+        # Flag to indicate if running on test mode
+        self.test_mode = False
+        self.save_freq = 1 # Number of episodes to wait before saving a copy of the policy
 
     def select_action(self, state):
         '''
@@ -203,7 +208,8 @@ class PPO:
         ### Clear buffer
         self.buffer.clear()
 
-    def train(self, env, logging = True, verbose = False):
+    def train(self, env, logging = True, verbose = False, model_dict = dict()):
+
         ### Set up logging
         if logging:
             self.log_f_name = setup_logging()
@@ -278,6 +284,10 @@ class PPO:
                 log_running_reward = 0
                 log_running_episodes = 0
 
+            ## Check if data should be saved
+            if self.test_mode and count_episodes % self.save_freq == 0:
+                model_dict['actor_model'] = self.policy.actor.state_dict()
+
         # Close log file
         if logging:
             log_f.close()
@@ -285,7 +295,9 @@ class PPO:
         # Save policy
         self.save_path = setup_model_saving()
         torch.save(self.policy.actor.state_dict(), self.save_path)
-        print(f"Actor model weights saved in: {self.save_path}\nLog file saved in: {self.log_f_name}")
+        print(f"Actor model weights saved in: {self.save_path}")
+        if logging:
+            print(f"Log file saved in: {self.log_f_name}")
 
         return self.save_path, self.log_f_name
 
