@@ -117,10 +117,10 @@ def plot_reward_distribution(rewards, labels=None):
                 if labels is not None:
                     plt.legend(labels)
 
-def setup_logging():
+def setup_logging(algorithm = "REINFORCE"):
 
     # log files for multiple runs are NOT overwritten
-    log_dir = "PPO_logs" + '/'
+    log_dir = algorithm + '_logs/'
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
@@ -130,7 +130,7 @@ def setup_logging():
     run_num = len(current_num_files)
 
     # create new log file for each run
-    log_f_name = log_dir + "/PPO_log_" + str(run_num) + ".csv"
+    log_f_name = log_dir + "/" + algorithm + "_log_" + str(run_num) + ".csv"
 
     return log_f_name
 
