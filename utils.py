@@ -134,10 +134,10 @@ def setup_logging(algorithm = "REINFORCE"):
 
     return log_f_name
 
-def setup_model_saving():
+def setup_model_saving(algorithm = "REINFORCE"):
 
     # Actor nn models for multiple runs are NOT overwritten
-    save_dir = "ActorModels" + '/'
+    save_dir = algorithm + "_policies" + '/'
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
         
@@ -147,7 +147,7 @@ def setup_model_saving():
     run_num = len(current_num_files)
 
     # create new log file for each run
-    save_f_name = save_dir + "/PPO_ActorModel_" + str(run_num) + ".pt"
+    save_f_name = save_dir + "/"+ algorithm + "_policy_" + str(run_num) + ".pt"
 
     return save_f_name
 
