@@ -5,7 +5,6 @@ from torch.distributions import MultivariateNormal
 from utils import *
 from IMP_CW_env import MESCEnv
 
-
 #region NEURAL NETWORKS DEFINITION: POLICY AND VALUE NETWORKS
 class PolicyNetwork(torch.nn.Module):
     def __init__(self, input_size, output_size, h1_size = 128, h2_size = 64):
@@ -15,17 +14,17 @@ class PolicyNetwork(torch.nn.Module):
         self.fc3 = torch.nn.Linear(h2_size, output_size)
 
     def forward(self, x):
-        x = torch.tanh(self.fc1(x))
-        x = torch.tanh(self.fc2(x))
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
         x = torch.relu(self.fc3(x))
         return x
 
 class ValueNetwork(torch.nn.Module):
     def __init__(self, input_size):
         super(ValueNetwork, self).__init__()
-        self.fc1 = torch.nn.Linear(input_size, 128)
-        self.fc2 = torch.nn.Linear(128, 64)
-        self.fc3 = torch.nn.Linear(64, 1)
+        self.fc1 = torch.nn.Linear(input_size, 256)
+        self.fc2 = torch.nn.Linear(256, 128)
+        self.fc3 = torch.nn.Linear(128, 1)
 
     def forward(self, x):
         x = torch.relu(self.fc1(x))
@@ -34,149 +33,151 @@ class ValueNetwork(torch.nn.Module):
         return x
 #endregion
 
-#region TRAINING LOOP
-def train_REINFORCE(env, 
-                    h1_size = 128,
-                    h2_size = 64,
-                    lr_policy_net = 0.00005,
-                    lr_value_net = 0.0001,
-                    discount_factor = .9 ,
-                    action_std_init = .5,
-                    action_std_min = .05 , 
-                    decay_rate = .03 ,
-                    decay_freq = 1000,
-                    num_trajectories = 100 ,
-                    max_timesteps = 5e6 ,
-                    max_time = 60 ,
-                    logging = True,
-                    ):
-    if logging:
-        log_f_name = setup_logging()
-        print(f"Log file saved in: {log_f_name}")
-        log_f = open(log_f_name, 'w+')
-        log_f.write("Iteration,Episode,Timestep,Reward,Std\n")
+#region REINFORCE IMPLEMENTATION
+class REINFORCE():
+    def __init__(self, lr_policy_net= 5e-5, lr_value_net = 1e-4, discount_factor = .99 , max_steps = 1e5, weight_entropy = 0.001, action_std_init = .5):
+        # Set hyperparameter values
+        self.lr_policy_net = lr_policy_net
+        self.lr_value_net = lr_value_net
+        self.discount_factor = discount_factor
+        self.max_steps = max_steps
+        self.weight_entropy = weight_entropy
+        self.action_std = action_std_init
 
-    # STEP 1: INITIALIZATION
-    policy_net = PolicyNetwork( input_size=env.observation_space.shape[0], output_size=env.action_space.shape[0],
-                                h1_size = h1_size,
-                                h2_size = h2_size)
-    value_net = ValueNetwork(input_size=env.observation_space.shape[0])
+        # Initialize interal attributes
+        self.counter_timesteps = 0
 
-    optimizer_policy = torch.optim.Adam(policy_net.parameters(), lr=lr_policy_net)
-    optimizer_value = torch.optim.Adam(value_net.parameters(), lr=lr_value_net)
+        # Define paths to store data
+        self.log_f_path = setup_logging(algorithm="REINFORCE")
+        self.save_f_path = setup_model_saving(algorithm="REINFORCE")
+        
+        
+    def choose_action(self, state, policy_net):
+        '''
+        Sample action in continuous action space modelled with a Multivariate Normal distribution
+        '''
+        # Predict action mean from Policy Network
+        action_mean = policy_net(torch.from_numpy(state).float())
 
-    count_timesteps = 0
-    count_episodes = 0
-    count_updates = 0
+        # Estimate action variance (decaying action std)
+        action_var = torch.full(size=(policy_net.fc3.out_features,) , fill_value = self.action_std**2)
+        cov_mat = torch.diag(action_var).unsqueeze(dim=0) 
 
-    log_episode_return = []
+        # Generate Multivariate Normal distribution with estimated mean and variance
+        dist = torch.distributions.MultivariateNormal(action_mean, cov_mat)
 
-    action_std = action_std_init
-    action_var = torch.full(size=(env.action_space.shape[0],) , fill_value = action_std**2)
-    cov_mat = torch.diag(action_var).unsqueeze(dim=0) # ASSUMPTION: independent actions, so the covariance matrix is diagonal with variance = action_variance
+        # Sample action
+        action = dist.sample()
 
-    while count_timesteps < max_timesteps:
-        loss_policy = []
-        loss_value = []
-        # STEP 2: GENERATE N TRAJECTORIES
-        for _ in range(num_trajectories):
+        # Compute logprob and entropy
+        logprob = dist.log_prob(action)
+        entropy = dist.entropy()
 
-            reward_buffer = []
-            state_buffer = []
-            state_value_buffer = []
-            logprob_buffer = []
+        return action, logprob , entropy
 
-            env.reset()
-            state = env.state
-            done = False
+    def rollout(self, env, policy_net, value_net):
+        """
+        Runs an episode of experience and collects relevant information
+        """
+        trajectory = {}
+        trajectory["values"] = []
+        trajectory["actions"] = []
+        trajectory["logprobs"] = []
+        trajectory["rewards"] = []
+        trajectory["entropies"] = []
 
-            while not done:
-                # ACTION SELECTION
-                # 1. Predict action mean
-                action_mean = policy_net(torch.FloatTensor(state)) # Returns a tensor where each element is the mean of the action distribution. The sum of all the elements in this tensor adds up to 1.
-                # 2. Decay action std (if proceed)
-                if count_timesteps % decay_freq == 0:
-                    action_std = max(action_std * (1-decay_rate), action_std_min)
-                    action_var = torch.full(size=(env.action_space.shape[0],) , fill_value = action_std**2)
-                    cov_mat = torch.diag(action_var).unsqueeze(dim=0) 
-                # 3. Sample action from normal distribution
-                dist = MultivariateNormal(action_mean, cov_mat) # Creates a multivariate normal distribution
-                action = dist.sample() #.detach()
-                action_logprob = dist.log_prob(action) #.detach()
+        done = False
+        env.reset()
+        state = env.state
+        
+        while not done:
+            action , action_logprob , entropy = self.choose_action(state, policy_net,)
+            next_state , reward , done , _ = env.step(action.detach().numpy().flatten())
 
-                # STORE DATA (PART 1)
-                state_value_buffer.append(value_net(torch.FloatTensor(state)))
-                logprob_buffer.append(action_logprob)
+            trajectory["values"].append(value_net(torch.from_numpy(state).float()))
+            trajectory["logprobs"].append(action_logprob)
+            trajectory["rewards"].append(reward)
+            trajectory["entropies"].append(entropy)
 
-                # ACTION EXECUTION
-                state , reward , done , _ = env.step(action.detach().numpy().flatten())
+            state = next_state
+            self.counter_timesteps += 1
 
-                # STORE DATA (PART 2)
-                reward_buffer.append(reward)
-                
-                count_timesteps += 1
+        return trajectory
 
-            # STEP 3: COMPUTE REWARD-TO-GO
-            reward2go_buffer = []
-            discounted_reward = 0
-            for r in reversed(reward_buffer):
-                discounted_reward = r + discount_factor * discounted_reward
-                reward2go_buffer.insert(0, discounted_reward)
+    def calculate_returns(self, rewards, discount_factor):
+        '''
+        Computes discounted return G_t.
+            G_t = sum_{k=t+1}{T} {gamma^(k-t-1) R_k}
+            where R_k is the reward of timestep k
+        '''
+        discounted_return = 0
+        returns = []
+        for r in reversed(rewards):
+            discounted_return = r + discount_factor * discounted_return
+            returns.insert(0, discounted_return)
+        return torch.tensor(returns , dtype=torch.float32)
+        
+    def train(  self,
+                env, *, 
+                h1_size = 128, 
+                h2_size = 64):
+        
+        # Create log file
+        self.log_f = open(self.log_f_path, 'w+')
+        self.log_f.write("Timestep,Reward\n")
+        
+        # Initialize policies and optimizers
+        policy_net = PolicyNetwork( input_size=env.observation_space.shape[0], output_size=env.action_space.shape[0],
+                                    h1_size = h1_size,
+                                    h2_size = h2_size)
+        value_net = ValueNetwork(input_size=env.observation_space.shape[0])
+        optimizer_policy = torch.optim.Adam(policy_net.parameters(), lr=self.lr_policy_net)
+        optimizer_value = torch.optim.Adam(value_net.parameters(), lr=self.lr_value_net)
 
-            # AUXILIARY STEP: CONVERT LISTS TO TENSORS AND MAKE THEM SIZE COMPATIBLE
-            reward2go_buffer = torch.tensor(reward2go_buffer, dtype=torch.float32) 
-            state_value_buffer = torch.stack(state_value_buffer)
-            logprob_buffer = torch.stack(logprob_buffer)
+        self.counter_timesteps = 0
 
-            # STEP 4: COMPUTE POLICY LOSS
-            # Pytorch supports broadcasting, so it is important to make sure that all tensors are of shape (episode_length,) before performing basic mathematical operations between them. 
-            # This is achieved using the command .squeeze() to the tensors with shape (episode_length, 1)
-            advantages =  (reward2go_buffer - state_value_buffer.squeeze()).detach()
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-10)
-            loss_policy.append(torch.sum(logprob_buffer.squeeze() * advantages))
-
-            # STEP 5: COMPUTE VALUE LOSS
-            ## Normalize rewards. PPO is very sensitive to the scale of the loss funciton. If rewards are too high or too low, updated can be erratic.
-            # reward2go_buffer = (reward2go_buffer - reward2go_buffer.mean()) / (reward2go_buffer.std() + 1e-10)
-            loss_value.append(torch.sum((reward2go_buffer - state_value_buffer.squeeze())**2)) # check if average over timesteps
-
-            count_episodes += 1
-            log_episode_return.append(sum(reward_buffer))
+        while self.counter_timesteps < self.max_steps:
+            # Generate an episode following policy_net
+            trajectory = self.rollout(env_train, policy_net, value_net)
             
-        # STEP 5: UPDATE NETWORKS
-        loss_policy = (-1) * torch.stack(loss_policy).mean()
-        optimizer_policy.zero_grad()
-        loss_policy.backward()
-        optimizer_policy.step()
+            logprobs = torch.stack(trajectory["logprobs"]).squeeze() # shape : (episode_length, )
+            entropies = torch.stack(trajectory["entropies"]).squeeze() # shape : (episode_length, )
+            values = torch.stack(trajectory["values"]).squeeze() # shape : (episode_length, )
 
-        loss_value = torch.stack(loss_value).mean()
-        optimizer_value.zero_grad()
-        loss_value.backward()
-        optimizer_value.step()
+            returns = self.calculate_returns(trajectory["rewards"], discount_factor=.99) # shape : (episode_length, )
 
-        count_updates += 1
+            advantages = returns - values
 
-        # LOG DATA
-        if logging: 
-            # log average reward till last episode
-            log_avg_reward = np.mean(log_episode_return)
-            log_avg_reward = round(log_avg_reward, 4)
-            log_std_reward = np.std(log_episode_return)
-            # Write to log file
-            log_f.write('{:.0f},{:.0f},{:.0f},{:.3f},{:.3f}\n'.format(count_updates ,count_episodes, count_timesteps, log_avg_reward, log_std_reward))
-            log_f.flush()
+            # Update Policy Network
+            loss_policy = (-1) * torch.mean(advantages.detach() * logprobs) + self.weight_entropy * ((-1) * torch.mean(entropies))
+            optimizer_policy.zero_grad()
+            loss_policy.backward()
+            # torch.nn.utils.clip_grad_norm_(policy_net.parameters(), 1)
+            optimizer_policy.step()
 
-    # Save policy
-    save_path = setup_model_saving()
-    torch.save(policy_net.state_dict(), save_path)
-    print(f"Policy model weights saved in: {save_path}")
+            # Update Value Network
+            loss_value = torch.nn.functional.mse_loss(values , returns)
+            optimizer_value.zero_grad()
+            loss_value.backward()
+            # torch.nn.utils.clip_grad_norm_(value_net.parameters(), float('inf'))
+            optimizer_value.step()
 
-    # Close log file
-    if logging:
-        log_f.close()
+            # Write episode undiscounted return evolution to log file
+            log_return = round(np.mean(sum(trajectory["rewards"])), 4)
+            self.log_f.write('{:.0f},{:.3f}\n'.format(self.counter_timesteps, log_return))
+            self.log_f.flush() 
 
-    return policy_net, save_path
-#endregion TRAINING LOOP
+        # Close log file
+        self.log_f.close()
+        print(f"Log file saved in: {self.log_f_path}") 
+
+        # Save agent policy
+        torch.save(policy_net.state_dict(), self.save_f_path)
+        print(f"Policy model weights saved in: {self.save_f_path}") 
+    
+
+#endregion
+
 
 if __name__ == "__main__":
 
@@ -191,25 +192,12 @@ if __name__ == "__main__":
 
     #region HYPERPARAMETER DEFINITION
     hyperparam = {}
-    hyperparam["num_trajectories"]= 3
-    hyperparam["max_timesteps"] =  3 * 50 * env_train.n_periods # Stopping criteria: number of environment time steps that the algorithm will be executed
-    hyperparam["discount_factor"] = 0.99 # Discount factor to evaluate return
 
-    hyperparam["action_std_init"] = .5
-    hyperparam["decay_freq"] = 1000
-    hyperparam["decay_rate"] = 0.03
-    hyperparam["action_std_min"] = 0.05
-
-    # hyperparam['h1_size'] = 256
-    # hyperparam['h2_size'] = 256
-
-    # hyperparam['lr_policy_net'] = 1e-4
-    # hyperparam['lr_value_net'] = 5e-4
     #endregion HYPERPARAMETER DEFINITION
 
-    optimal_policy , _ = train_REINFORCE(env_train, **hyperparam)
-    log_file_path = r"C:\Users\Isabela\Desktop\GitHubRepos\courseworkRL\REINFORCE_logs\REINFORCE_log_0.csv"
-    timesteps, rewards, std = read_log_file(log_file_path, )
-    plot_reward_evolution(timesteps, rewards, reward_std=std)
+    policy_net = PolicyNetwork(input_size=env_train.observation_space.shape[0], output_size=env_train.action_space.shape[0],)
+    agent = REINFORCE(max_steps=28*1000)
+    agent.train(env_train)
+    timesteps , rewards = read_log_file(agent.log_f_path)
+    plot_reward_evolution(timesteps, rewards)
     plt.show()
-    a=0
