@@ -11,7 +11,7 @@ class MESCEnv():
         '''
         self.name = "InventoryManagement"
         # Default values for the initial conditions (overriden if kwargs are passed)
-        self.n_periods = 52*7 # 52 weeks * 7 days
+        self.n_periods = kwargs.get("num_periods", 52*7) # 52 weeks * 7 days
         self.seed = 0
         self.demand_dist_fcn = poisson
         self.demand_dist_param = [{'mu': 3}, # Mo-Thu
