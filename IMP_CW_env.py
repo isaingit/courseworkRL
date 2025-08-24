@@ -15,8 +15,8 @@ class MESCEnv():
         self.seed = 0
         self.demand_dist_fcn = poisson
         self.demand_dist_param = [{'mu': 3}, # Mo-Thu
-                                  {'mu': 10}, # Fri
-                                  {'mu': 15}] # Sat-Sun
+                                  {'mu': 6}, # Fri
+                                  {'mu': 7}] # Sat-Sun
         
         # Buffers to store data
         self.demand_dataset = None # Attribute to store the demands of the episode if externally provided (e.g., during evaluation)
@@ -104,9 +104,26 @@ class MESCEnv():
         fixed_order_cost = np.sum(DC.fix_order_cost*DC.n_orders for DC in self.DCs) + np.sum(retailer.fix_order_cost*retailer.n_orders for retailer in self.retailers)
         var_order_cost = np.sum(DC.var_order_cost * action[i+len(self.retailers)] for i, DC in enumerate(self.DCs))
         penalty_unsatisfied_demand = np.sum(retailer.UD * retailer.lost_sales_cost for retailer in self.retailers) 
-        penalty_capacity_violation = np.sum(DC.I_surplus * DC.capacity_violation_cost for DC in self.DCs) + np.sum(retailer.I_surplus * retailer.capacity_violation_cost for retailer in self.retailers) # Penalty for exceeding storage capacity
+        def saturating_penalty(x, coef, scale):
+            '''
+            Instead of scaling linearly forever, applies tanh function to preserve a strong penatly for small violations while avoiding unbounded spikes.
+            
+            Motivation:
+                It was identified that capacity violation seldom happened. For this reason, the capacity violation coefficient was set large.
+                However, some actions led to nearly unbounded penalties for capacity violation, becoming extreme points of the reward function that should be avoided.
+                This observation has motivated the use of a saturating penalty function.
+            
+            Arguments:
+            - x: surplus units
+            - coef: saturation point of the penalty (i.e., max penalty to be applied)
+            - scale: how fast saturation appears. It can be seen as the slope of the tanh function before saturation. Smaller scale = steeper slope.
+                     If scale = capacity/2, going half over the capacity gives ~70% of maximum penalty.
+            '''
+            return coef * np.tanh(x/scale)
+        penalty_capacity_violation = np.sum(saturating_penalty(DC.I_surplus, DC.capacity * DC.capacity_violation_cost, DC.capacity*.75) for DC in self.DCs) \
+                                   + np.sum(saturating_penalty(retailer.I_surplus, retailer.capacity * retailer.capacity_violation_cost, retailer.capacity*.75)  for retailer in self.retailers) # Penalty for exceeding storage capacity
         reward = revenue - holding_cost - fixed_order_cost - var_order_cost - penalty_unsatisfied_demand - penalty_capacity_violation
-        # print(f"Period {self.current_period} - Reward: {reward}, Revenue: {revenue}, Holding Cost: {holding_cost}, Fixed Order Cost: {fixed_order_cost}, Variable Order Cost: {var_order_cost}, Penalty Unsatisfied Demand: {penalty_unsatisfied_demand}, Penalty Capacity Violation: {penalty_capacity_violation}")
+        # print(f"Period {self.current_period} - Reward: {reward}, Revenue: {revenue}, Penalty Capacity Violation: {penalty_capacity_violation}, SurplusDC: {np.sum(DC.I_surplus for DC in self.DCs)}, SurplusR: {np.sum(r.I_surplus for r in self.retailers)}, Holding Cost: {holding_cost}, Fixed Order Cost: {fixed_order_cost}, Variable Order Cost: {var_order_cost}, Penalty Unsatisfied Demand: {penalty_unsatisfied_demand}")
         #> 4. Update period
         self.current_period += 1
 
@@ -151,13 +168,13 @@ class DC():
     def __init__(self, retailers , *args, **kwargs):
         # Defaul values for the initial conditions (overriden if kwargs are passed)
         self.I0 = 100 # Initial on-hand inventory
-        self.lead_time = 3
+        self.lead_time = 2
         self.capacity = 150 # storage capacity of the DC
         self.order_quantity_limit = 200 # productive capacity of DC's supplier. TBD: check how now it's unused
         self.holding_cost = .5
         self.fix_order_cost = 50
         self.var_order_cost = 5 # It was set in the parent class in the original article
-        self.capacity_violation_cost = 30 # Penalty of exceeding storage capacity expressed in cost/item
+        self.capacity_violation_cost = 5 # Penalty of exceeding storage capacity expressed in cost/item
 
         self.retailers = retailers # List of retailers served by the DC
         
@@ -259,14 +276,14 @@ class Retailer():
     #TBD add a penalty for unsatisfied demand (lost sales) instead of a backlog to retailer
     def __init__(self, *args, **kwargs):
         self.I0 = 25
-        self.lead_time = 2
+        self.lead_time = 1
         self.capacity = 75
         self.order_quantity_limit = 50
-        self.holding_cost = 3
+        self.holding_cost = 1
         self.fix_order_cost = 10
         self.unit_price = 100
         self.lost_sales_cost = 5
-        self.capacity_violation_cost = 15 # Penalty for exceeding storage capacity expressed in cost/item
+        self.capacity_violation_cost = 5 # Penalty for exceeding storage capacity expressed in cost/item
         
         self.reset()
 
