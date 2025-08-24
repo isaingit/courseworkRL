@@ -67,7 +67,7 @@ class HeuristicPolicy:
             return -1*total_reward
 
     def objective_fcn(self, policy_param, policy_function, env, demand=None):
-        num_runs = 1
+        num_runs = 5
         total_reward_list = []
         for _ in range(num_runs):
             total_reward = self.reward_fcn(policy_param, policy_function, env, demand)
