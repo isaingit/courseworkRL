@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib as mpl   
+import torch
 
 SMALL_SIZE = 8
 MEDIUM_SIZE = 10
@@ -24,7 +25,11 @@ def read_log_file(log_file_path):
     df = pd.read_csv(log_file_path)
     x = df['Timestep']
     y = df['Reward']
-    return x, y
+    try: df['Std']
+    except:
+        return x, y
+    else:
+        return x, y, df['Std']
 
 def plot_reward_evolution(timesteps, rewards, save_dir=None, reward_std=None): 
     
@@ -42,7 +47,7 @@ def plot_reward_evolution(timesteps, rewards, save_dir=None, reward_std=None):
         return smoothed
     
     if reward_std is None:
-        rewards_smooth = smooth(rewards, 0.75)
+        rewards_smooth = smooth(rewards, 0.95)
         timesteps_smooth = timesteps[:len(rewards_smooth)]
 
         # Plotting
@@ -150,4 +155,25 @@ def setup_model_saving(algorithm = "REINFORCE"):
     save_f_name = save_dir + "/"+ algorithm + "_policy_" + str(run_num) + ".pt"
 
     return save_f_name
+
+def sample_uniform_params(params_prev, param_min, param_max):
+    '''
+    Sample random point within given parameter bounds. Tailored for EXPLORATORY purposes
+    '''
+    params = {k: torch.rand(v.shape) * (param_max - param_min) + param_min \
+              for k, v in params_prev.items()}
+    return params
+
+def sample_local_params(params_prev, param_min, param_max):
+    '''
+    Sample a random point in the neighborhood of a given point or value or the parameters (v). Tailored for EXPLOITATION purposes
+
+    Explanation:
+    sign = (torch.randint(2, (v.shape)) * 2 - 1) # This returns either -1 or 1
+    eps = torch.rand(v.shape) * (param_max - param_min) # This returns the width of the step to be taken in the modification of the parameters
+    Hence, the total update is: v + sign*eps.
+    '''
+    params = {k: torch.rand(v.shape) * (param_max - param_min) * (torch.randint(2, (v.shape))*2 - 1) + v \
+              for k, v in params_prev.items()}
+    return params
 
