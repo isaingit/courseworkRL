@@ -96,7 +96,7 @@ class MESCEnv():
             self.retailers[i].receive_order(self.current_period)
 
             #> 2.2 Retailers satisfy demand from customers
-            self.retailers[i].satisfy_demand(self.dow)
+            self.retailers[i].satisfy_demand(self.current_period)
         
         #> 3. Compute reward
         revenue = np.sum(retailer.SD * retailer.unit_price for retailer in self.retailers) # Revenue from sale
