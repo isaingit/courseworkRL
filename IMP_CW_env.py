@@ -142,7 +142,7 @@ class MESCEnv():
     
     def _update_state(self):
         self.dow = (self.current_period-1) % 7 # Day of the week (0-6)
-        self.state = np.array([retailer.I for retailer in self.retailers]+ [DC.inv_pos for DC in self.DCs] + [self.dow])
+        self.state = np.array([retailer.inv_pos for retailer in self.retailers]+ [DC.inv_pos for DC in self.DCs] + [self.dow])
 
     def sample_demands_episode(self):
         '''
