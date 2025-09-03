@@ -329,7 +329,7 @@ class Retailer():
         return n_orders
     
     def satisfy_demand(self, current_period):
-        demand = self.demands_episode[current_period] 
+        demand = self.demands_episode[current_period-1] 
         self.SD = np.minimum(demand, self.I, dtype=self.I.dtype)
         self.I -= self.SD
         self.UD = demand - self.SD
