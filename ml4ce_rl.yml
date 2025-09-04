@@ -90,6 +90,7 @@ dependencies:
       - torch==2.7.1
       - torchaudio==2.7.1
       - torchvision==0.22.1
+      - tqdm==4.67.1
       - tzdata==2025.2
       - widgetsnbextension==4.0.14
-prefix: C:\Users\Isabela\anaconda3\envs\ml4ce_rl
+prefix: C:\Users\EQUIPO\miniconda3\envs\ml4ce_rl

@@ -31,7 +31,7 @@ def read_log_file(log_file_path):
     else:
         return x, y, df['Std']
 
-def plot_reward_evolution(timesteps, rewards, save_dir=None, reward_std=None): 
+def plot_reward_evolution(timesteps, rewards, save_dir=None, reward_std=None, xlabel=None, ylabel=None): 
     
     def smooth(scalars: list[float], weight: float) -> list[float]:  # Weight between 0 and 1
         '''
@@ -52,12 +52,18 @@ def plot_reward_evolution(timesteps, rewards, save_dir=None, reward_std=None):
 
         # Plotting
         plt.clf()
-        plt.plot(timesteps, rewards, label='Average reward', color='dodgerblue', alpha=0.5)
-        plt.plot(timesteps_smooth, rewards_smooth, label='Smoothed reward (EMA)', color='orange', linewidth=2)
+        plt.plot(timesteps, rewards, label='Actual value', color='dodgerblue', alpha=0.5)
+        plt.plot(timesteps_smooth, rewards_smooth, label='Exponential Moving Average', color='orange', linewidth=2)
 
         # Labels and title
-        plt.xlabel("Time steps")
-        plt.ylabel("Reward")
+        if xlabel == None:
+            plt.xlabel("Time steps")
+        else:
+            plt.xlabel(xlabel)
+        if ylabel == None:
+            plt.ylabel("Reward") 
+        else:
+            plt.ylabel(ylabel)   
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
@@ -76,8 +82,14 @@ def plot_reward_evolution(timesteps, rewards, save_dir=None, reward_std=None):
         plt.plot(timesteps[best_reward_idx], best_reward, 'o', color='red', zorder=5)
 
         # Labels and title
-        plt.xlabel("Iterations")
-        plt.ylabel("Reward")
+        if xlabel == None:
+            plt.xlabel("Iterations")
+        else:
+            plt.xlabel(xlabel)
+        if ylabel == None:
+            plt.ylabel("Reward") 
+        else:
+            plt.ylabel(ylabel) 
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
@@ -155,25 +167,3 @@ def setup_model_saving(algorithm = "REINFORCE"):
     save_f_name = save_dir + "/"+ algorithm + "_policy_" + str(run_num) + ".pt"
 
     return save_f_name
-
-def sample_uniform_params(params_prev, param_min, param_max):
-    '''
-    Sample random point within given parameter bounds. Tailored for EXPLORATORY purposes
-    '''
-    params = {k: torch.rand(v.shape) * (param_max - param_min) + param_min \
-              for k, v in params_prev.items()}
-    return params
-
-def sample_local_params(params_prev, param_min, param_max):
-    '''
-    Sample a random point in the neighborhood of a given point or value or the parameters (v). Tailored for EXPLOITATION purposes
-
-    Explanation:
-    sign = (torch.randint(2, (v.shape)) * 2 - 1) # This returns either -1 or 1
-    eps = torch.rand(v.shape) * (param_max - param_min) # This returns the width of the step to be taken in the modification of the parameters
-    Hence, the total update is: v + sign*eps.
-    '''
-    params = {k: torch.rand(v.shape) * (param_max - param_min) * (torch.randint(2, (v.shape))*2 - 1) + v \
-              for k, v in params_prev.items()}
-    return params
-

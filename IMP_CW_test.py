@@ -3,7 +3,7 @@ import numpy as np
 import multiprocessing as mp
 import time
 
-from HeuristicPolicy_file import HeuristicPolicy, Optimizer
+from heuristic_policy import HeuristicPolicy, Optimizer
 from PPO_file import PPO
 from utils import plot_reward_evolution, read_log_file, plot_reward_distribution
 
