@@ -5,6 +5,11 @@ import torch
 File containing common functions shared by the algorithms that model the policy with a neural network
 '''
 class PolicyNetwork(torch.nn.Module):
+    '''
+    MLP that takes environment state as input and outputs the mean value of each action.
+
+    Assumption: actions follow independent normal distributions.
+    '''
     def __init__(self, input_size, output_size, h1_size = 128, h2_size = 64): 
         super(PolicyNetwork, self).__init__()
         self.fc1 = torch.nn.Linear(input_size, h1_size)
@@ -16,18 +21,23 @@ class PolicyNetwork(torch.nn.Module):
         x = torch.tanh(self.fc2(x))
         x = torch.relu(self.fc3(x))
         return x
+
+class DiscretePolicyNetwork(torch.nn.Module):
+    '''
+    MLP that takes environment state as input and outputs the probability of taking each action
+    '''
+    def __init__(self, input_size, output_size, h1_size = 128, h2_size = 64): 
+        super(DiscretePolicyNetwork, self).__init__()
+        self.fc1 = torch.nn.Linear(input_size, h1_size)
+        self.fc2 = torch.nn.Linear(h1_size, h2_size)
+        self.fc3 = torch.nn.Linear(h2_size, output_size)
+
+    def forward(self, x):
+        x = torch.tanh(self.fc1(x))
+        x = torch.tanh(self.fc2(x))
+        x = torch.softmax(self.fc3(x),dim=-1)
+        return x
     
-    def sample_action(self, state):
-        # Pre-process state
-        state = torch.FloatTensor(state)
-
-        # Get action according to the policy network
-        action_mean = self(state)
-        action_mean = action_mean.detach().numpy()
-        action_mean = np.floor(action_mean)
-
-        return action_mean
-
 def reward_fcn(policy_net, env, num_episodes=10, demand=None):
     '''
     Runs a series of episodes and computes the average total return.
@@ -62,10 +72,18 @@ def reward_fcn(policy_net, env, num_episodes=10, demand=None):
         
         while episode_terminated == False:
             # Sample action
-            action_mean = policy_net.sample_action(state)
+            if isinstance(policy_net, PolicyNetwork):
+                action_mean = policy_net(torch.FloatTensor(state)) 
+                # TODO: Add covariance matrix and sample action from MultivariateNormal distribution
+                action = np.fix(action_mean.detach().numpy())
+            elif isinstance(policy_net, DiscretePolicyNetwork):
+                action_probs = policy_net(torch.FloatTensor(state))
+                dist = torch.distributions.Categorical(action_probs)
+                action_idx = dist.sample().detach().numpy()
+                action = np.array(list(env.action_lookup.keys())[action_idx])
             
             # Interact with the environment to get reward and next state
-            state , reward, episode_terminated, _ = env.step(action_mean)
+            state , reward, episode_terminated, _ = env.step(action)
             total_reward += reward
             
         reward_list.append(total_reward)
@@ -75,3 +93,10 @@ def reward_fcn(policy_net, env, num_episodes=10, demand=None):
     std_reward = np.std(reward_list)
     
     return mean_reward, std_reward
+
+def evaluate_policy(policy_net, env, test_demand_dataset):
+    reward_list = []
+    for demand in test_demand_dataset:
+        reward, _ = reward_fcn(policy_net, env, num_episodes=1, demand=demand)
+        reward_list.append(reward)
+    return reward_list

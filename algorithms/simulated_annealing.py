@@ -3,7 +3,7 @@ import copy
 import time
 import tqdm
 
-from common import *
+from common import PolicyNetwork, DiscretePolicyNetwork, reward_fcn
 from utils import setup_model_saving
 
 def simulated_annealing_alg(env, *,
@@ -27,9 +27,14 @@ def simulated_annealing_alg(env, *,
     best_reward_history = []
 
     # Policy initialization
-    policy_net = PolicyNetwork(input_size=env.observation_space.shape[0], 
-                               output_size=env.action_space.shape[0],
+    if env.name == "InventoryManagement":
+        policy_net = PolicyNetwork(input_size=env.observation_space.shape[0], 
+                                output_size=env.action_space.shape[0],
                                 )
+    elif env.name == "DiscreteInventoryManagement":
+        policy_net = DiscretePolicyNetwork(input_size=env.observation_space.shape[0], 
+                                           output_size=env.action_space.n,
+                                           )
 
     # # INITIALIZATION
     # Parameters

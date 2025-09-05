@@ -2,6 +2,7 @@ import gymnasium as gym
 import numpy as np
 from scipy.stats import poisson
 import copy
+import itertools
 
 class MESCEnv():   
     def __init__(self, structure, *args, **kwargs):
@@ -163,6 +164,195 @@ class MESCEnv():
             demands_episode.append(scenario)
 
         return np.array(demands_episode), prob_per_scenario 
+    
+class DiscreteMESCEnv():   
+    def __init__(self, structure, *args, **kwargs):
+        '''
+        Args:s
+            structure : List of integers whose length is the number of stages and each element is the number of participants in that stage.
+        '''
+        self.name = "DiscreteInventoryManagement"
+        # Default values for the initial conditions (overriden if kwargs are passed)
+        self.n_periods = kwargs.get("num_periods", 4*7) # 4 weeks * 7 days
+        self.seed = 0
+        self.demand_dist_fcn = poisson
+        self.demand_dist_param = {'mu': 10}
+        
+        # Buffers to store data
+        self.demand_dataset = None # Attribute to store the demands of the episode if externally provided (e.g., during evaluation)
+
+        # Assigned the sub-classed frozen distribution to the demand distribution function
+        if self.demand_dist_fcn is poisson:
+            self.demand_dist = frozen_poisson(random_state=self.seed)
+
+        # Update initial values if kwargs are passed
+        for key, value in kwargs.items():
+            setattr(self, key, value)  
+
+        # Definition of the supply chain
+        self.structure = structure # Number of retailers and DCs in the system
+        # Instantiate retailers        
+        self.retailers = []
+        for i in range(sum(structure[0])):
+            self.retailers.append(Retailer())
+
+        # Instantiate DCs  
+        self.DCs = []
+        for i in range(len(structure[1])):
+            self.DCs.append(DC(self.retailers[(i*structure[0][i]):(i*structure[0][i]+structure[0][i])]))
+
+        # Define action space: reorder quantities of each stage m at each period t
+        self.action_mapping = [[0, 10, 20] for _ in range(len(self.retailers))] + [[0, 50, 100] for _ in range(len(self.DCs))]
+        self.action_space = gym.spaces.MultiDiscrete(nvec = [len(m) for m in self.action_mapping],
+                                                     dtype=np.int16,
+                                                     seed=None, start=None)
+        self.action_space.n_indep = self.action_space.nvec.sum() # number of actions, when considered independent
+        self.action_space.n = self.action_space.nvec.prod() # number of joint actions
+        self.action_lookup = {tuple(action): i for i, action in enumerate(list(itertools.product(*self.action_mapping)))}
+        
+        # Define observation space: inventory position of each entity + day of the week
+        # CAUTION: IN THE ORIGINAL ENVIRONMENT, THE OBSERVATION SPACE DEFINES DCS FIRST, BUT HERE IT WAS CHANGED TO ALIGN WITH ACTIONS
+        self.observation_mapping = [[0, 1/3 , 2/3 , 1] * ret.capacity for ret in self.retailers] + [[0, 1/3, 2/3, 1] * DC.capacity for DC in self.DCs]
+        self.observation_space = gym.spaces.MultiDiscrete(nvec = [len(m) for m in self.observation_mapping] ,
+                                                                  dtype=np.int16,
+                                                                  seed=None, start=None) # TODO: check why is it unused (also in original env IMP_CW_env.py)
+        self.observation_space.n = self.observation_space.nvec.prod() # number of joint possible states
+        self.observation_lookup = {tuple(obs): i for i,obs in enumerate(list(itertools.product(*self.observation_mapping)))}
+
+        self.reset()
+        
+    def _RESET(self):
+        self.current_period = 1        
+        # Definition of the self.demands_episode attribute, which stores the demand information that will be actually used during self.step()
+        if self.demand_dataset is None:
+            self.demands_episode , self.prob_per_scenario = self.sample_demands_episode()
+        else:
+            self.demands_episode = copy.deepcopy(self.demand_dataset)
+
+        for i, retailer in enumerate(self.retailers):
+            retailer.reset(self.demands_episode[:,i])
+        for DC in self.DCs:
+            DC.reset()
+        
+        self._update_state()
+        self._discretize_state(self.state)
+    def reset(self):
+        return self._RESET()
+
+    def _STEP(self, action):
+        #> 0. Ensure action has the correct type
+        action = np.astype(action, np.int16)
+
+        for i in range(len(self.DCs)):
+            #> 1.1 DCs place orders to supplier
+            # TODO: revise it's being done correctly. Depending on the meaning, it should take one action or the other.
+            self.DCs[i].place_order(action[i+len(self.retailers)], self.current_period)
+
+            #> 1.2 DCs receive orders from supplier
+            self.DCs[i].receive_order(self.current_period)
+
+            #> 1.3 DCs satisfy demand from retailers
+            self.DCs[i].satisfy_demand(self.DCs[i].retailers, action[:len(self.retailers)], self.current_period)
+        
+        for i in range(len(self.retailers)):
+            #> 2.1 Retailers receive orders from DCs
+            self.retailers[i].receive_order(self.current_period)
+
+            #> 2.2 Retailers satisfy demand from customers
+            self.retailers[i].satisfy_demand(self.current_period)
+        
+        #> 3. Compute reward
+        revenue = np.sum(retailer.SD * retailer.unit_price for retailer in self.retailers) # Revenue from sale
+        holding_cost = np.sum(DC.I * DC.holding_cost for DC in self.DCs) + np.sum(retailer.I * retailer.holding_cost for retailer in self.retailers) 
+        fixed_order_cost = np.sum(DC.fix_order_cost*DC.n_orders for DC in self.DCs) + np.sum(retailer.fix_order_cost*retailer.n_orders for retailer in self.retailers)
+        var_order_cost = np.sum(DC.var_order_cost * action[i+len(self.retailers)] for i, DC in enumerate(self.DCs))
+        penalty_unsatisfied_demand = np.sum(retailer.UD * retailer.lost_sales_cost for retailer in self.retailers) 
+        def saturating_penalty(x, coef, scale):
+            '''
+            Instead of scaling linearly forever, applies tanh function to preserve a strong penatly for small violations while avoiding unbounded spikes.
+            
+            Motivation:
+                It was identified that capacity violation seldom happened. For this reason, the capacity violation coefficient was set large.
+                However, some actions led to nearly unbounded penalties for capacity violation, becoming extreme points of the reward function that should be avoided.
+                This observation has motivated the use of a saturating penalty function.
+            
+            Arguments:
+            - x: surplus units
+            - coef: saturation point of the penalty (i.e., max penalty to be applied)
+            - scale: how fast saturation appears. It can be seen as the slope of the tanh function before saturation. Smaller scale = steeper slope.
+                     If scale = capacity/2, going half over the capacity gives ~70% of maximum penalty.
+            '''
+            return coef * np.tanh(x/scale)
+        penalty_capacity_violation = np.sum(saturating_penalty(DC.I_surplus, DC.capacity * DC.capacity_violation_cost, DC.capacity*.75) for DC in self.DCs) \
+                                   + np.sum(saturating_penalty(retailer.I_surplus, retailer.capacity * retailer.capacity_violation_cost, retailer.capacity*.75)  for retailer in self.retailers) # Penalty for exceeding storage capacity
+        reward = revenue - holding_cost - fixed_order_cost - var_order_cost - penalty_unsatisfied_demand - penalty_capacity_violation
+        
+        # print(f"Period {self.current_period} - Reward: {rewarkd}, Revenue: {revenue}, Penalty capacity: {penalty_capacity_violation}, Holding Cost: {holding_cost}, Fixed Order Cost: {fixed_order_cost}, Variable Order Cost: {var_order_cost}, Penalty Unsatisfied Demand: {penalty_unsatisfied_demand}")
+        #> 4. Update period
+        self.current_period += 1
+
+        #> 5. Update state
+        self._update_state() # This function updates the "true state" of the environment in self.state
+
+        #> 6. Check if episode is finished
+        if self.current_period > self.n_periods:
+            episode_ended = True
+        else:
+            episode_ended = False
+
+        #> 7. Map environment state (true values) to values that agent can observe (fixed in self.observation_mapping)
+        self._discretize_state(self.state)
+
+        return self.obs , reward, episode_ended , {}
+    def step(self, action):
+        return self._STEP(action)
+    
+    def _update_state(self):
+        self.state = np.array([retailer.inv_pos for retailer in self.retailers]+ [DC.inv_pos for DC in self.DCs])
+
+    def _discretize_state(self, state):
+        '''
+        POMDP: the environment knows the "true state" (i.e., the actual inventory position), but the agent only observes
+        a discretized version of it, since the observation_space is only allowed to take 4 discrete values.
+        '''
+        self.obs = np.array([self._probabilistic_rounding(value, bins) for value, bins in zip(state, self.observation_mapping)], dtype=np.int16) 
+    
+    def _probabilistic_rounding(self, value, bins):
+        if value <= min(bins):
+            return min(bins)
+        elif value >max(bins):
+            return max(bins)
+        else: # find neighbors
+            for i in range(len(bins)):
+                if bins[i] <= value <= bins[i+1]:
+                    low, high = bins[i], bins[i+1]
+                    p_low = 1. - (value - low) / (high - low)
+                    p_high = 1. - p_low
+                    return np.random.choice([low, high], p=[p_low,p_high])
+            
+    def sample_demands_episode(self):
+        '''
+        Sample demand for each retailer in the current period. The demand distribution function is defined in the __init__ method.
+        '''
+        demands_episode = []
+        prob_per_scenario = np.zeros(self.n_periods, dtype=np.float32)
+        for i in range(self.n_periods):
+            demand_dist_param = self.demand_dist_param
+            scenario = self.demand_dist.rvs(**demand_dist_param, size=len(self.retailers))
+            prob_per_scenario[i] = np.prod([self.demand_dist.pmf(scenario[j], **demand_dist_param) for j in range(len(scenario))])
+            demands_episode.append(scenario)
+
+        return np.array(demands_episode), prob_per_scenario
+
+    def sample_action(self, probabilities:tuple=None):
+        '''
+        NOTE: feature of passing probabilities is not used because it would imply that actions are independent and it has been decided to work with joint actions. 
+        - Reason: probability argument taken by the sample method of the MultiDiscrete class should be a tuple of ndarrays, each array with the probabilities of each one of the values that each action can take.
+        - Reference: https://gymnasium.farama.org/api/spaces/fundamental/#gymnasium.spaces.MultiDiscrete.sample
+        # TODO: check if that assumption is ok
+        '''
+        action_idx = self.action_space.sample(probability=probabilities)
+        return np.array([values[idx] for idx,values in zip(action_idx, self.action_mapping)], dtype=np.int16)
 
 class DC():
     def __init__(self, retailers , *args, **kwargs):

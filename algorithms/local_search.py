@@ -1,11 +1,11 @@
 import numpy as np
 import time
 import copy
-
+import tqdm
 import torch
 
 from utils import setup_model_saving
-from common import *
+from common import PolicyNetwork, DiscretePolicyNetwork, reward_fcn
 
 def local_search_alg(env, *,                    
                      param_min = -1.,
@@ -36,9 +36,14 @@ def local_search_alg(env, *,
     radius_list = []
 
     # Build neural network model
-    policy_net = PolicyNetwork(input_size=env.observation_space.shape[0], 
-                               output_size=env.action_space.shape[0],
-                               )
+    if env.name == "InventoryManagement":
+        policy_net = PolicyNetwork(input_size=env.observation_space.shape[0], 
+                                output_size=env.action_space.shape[0],
+                                )
+    elif env.name == "DiscreteInventoryManagement":
+        policy_net = DiscretePolicyNetwork(input_size=env.observation_space.shape[0], 
+                                           output_size=env.action_space.n,
+                                           )
 
     # Setup iterations dedicated to random and local search
     iter_rs = round(max_iter * ratio_rs_ls) 
@@ -64,7 +69,8 @@ def local_search_alg(env, *,
     start_time = time.time()
 
     # OPTIMIZATION LOOP: POLICY SEARCH
-    while (i < max_iter) and ((time.time()-start_time) < max_time):
+    for i in tqdm.tqdm(range(max_iter)):
+    # while (i < max_iter) and ((time.time()-start_time) < max_time):
         # STEP 2: sample parameters
         if i <= iter_rs:
             # Sample a random policy
@@ -107,8 +113,10 @@ def local_search_alg(env, *,
     # DO NOT MODIFY CODE BELOW THIS LINE
     # ######################################################################################
 
-    if time.time() - start_time > max_time:
-        print("Timeout reached: the best policy found so far will be returned.")
+        # Check time
+        if (time.time()-start_time) > max_time:
+            print("Timeout reached: the best policy found so far will be returned.")
+            break
 
     # Pack data for plotting
     plot_data = {'reward_history': reward_history,
